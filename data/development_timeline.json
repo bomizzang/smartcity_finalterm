@@ -1,0 +1,70 @@
+{
+  "pangyo": [
+    {
+      "year": 2009,
+      "cumulative": 3
+    },
+    {
+      "year": 2010,
+      "cumulative": 9
+    },
+    {
+      "year": 2011,
+      "cumulative": 24
+    },
+    {
+      "year": 2012,
+      "cumulative": 34
+    },
+    {
+      "year": 2013,
+      "cumulative": 45
+    },
+    {
+      "year": 2014,
+      "cumulative": 55
+    },
+    {
+      "year": 2015,
+      "cumulative": 60
+    },
+    {
+      "year": 2016,
+      "cumulative": 62
+    },
+    {
+      "year": 2020,
+      "cumulative": 64
+    }
+  ],
+  "gimpo": [
+    {
+      "year": 2019,
+      "cumulative": 4
+    },
+    {
+      "year": 2020,
+      "cumulative": 13
+    },
+    {
+      "year": 2021,
+      "cumulative": 14
+    },
+    {
+      "year": 2022,
+      "cumulative": 17
+    },
+    {
+      "year": 2023,
+      "cumulative": 20
+    },
+    {
+      "year": 2024,
+      "cumulative": 25
+    },
+    {
+      "year": 2025,
+      "cumulative": 26
+    }
+  ]
+}

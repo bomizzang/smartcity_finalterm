@@ -1,0 +1,1138 @@
+const { useState, useEffect } = React;
+
+const PANGYO_CENTER = [37.4035, 127.1052];
+const GIMPO_CENTER = [37.6417, 126.6195];
+// 핵심역 정확 좌표 (subway_network.zip nodes.tsv 기준)
+const PANGYO_STATION = [37.394782, 127.111443];
+const GURAE_STATION = [37.64537030405077, 126.62853189571263];
+const PALETTE = ['#c2356b', '#d96a8f', '#eda6bf', '#e8917a', '#f0b49f', '#f6d2c2', '#d9c2c9'];
+
+// 필지/건축물 주용도 컬러맵 — §4 "필지/건축물 단위 주용도 컬러맵" 요구사항
+const USE_COLOR_MAP = {
+  '업무시설': '#c2356b',
+  '교육연구시설': '#7a2a52',
+  '공장': '#e8917a',
+  '창고시설': '#f0b49f',
+  '공동주택': '#9b6a8f',
+  '자동차관련시설': '#d4a72c',
+  '제2종근린생활시설': '#e3b8c4',
+  '의료시설': '#a87ca0',
+  '위험물저장및처리시설': '#b88a3f',
+  '나대지': '#e8d5da',
+};
+function useColor(use) {
+  return USE_COLOR_MAP[use] || '#cfb8c0';
+}
+
+// 법정 용도지역(zoning, blockType) 컬러맵
+const ZONE_COLOR_MAP = {
+  '도시지원시설용지': '#c2356b',
+  '자족기능확보시설': '#c2356b',
+  '도로': '#9aa0a8',
+  '보행자전용도로': '#c4cad1',
+  '완충녹지': '#5a8a5e',
+  '경관녹지': '#7aa87e',
+  '근린공원': '#4f7d54',
+  '공공공지': '#8bb8a0',
+  '어린이공원': '#6fae73',
+  '일반광장': '#d4a72c',
+  '주차장': '#9b8a7a',
+  '수도공급시설': '#7a93b8',
+  '위험물저장및처리시설': '#b85c3f',
+  '주유소용지': '#b85c3f',
+};
+function zoneColor(blockType) {
+  return ZONE_COLOR_MAP[blockType] || '#cfb8c0';
+}
+
+// VWorld 오픈API 인증키 — GitHub에 올릴 때 이 값을 빈 문자열('')로 바꾸면 OSM 무료 타일로 자동 대체됨.
+// 키 보안이 걱정되면 이 줄만 비우고 올리세요.
+const VWORLD_KEY = "66FE285E-7323-313F-94DF-C755912D9DAF";
+
+const OSM_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OSM_ATTR = '&copy; OpenStreetMap contributors';
+const VWORLD_URL = VWORLD_KEY
+  ? `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/Base/{z}/{y}/{x}.png`
+  : null;
+const VWORLD_ATTR = '&copy; VWorld';
+const GRAY_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+const GRAY_ATTR = '&copy; CARTO &copy; OpenStreetMap contributors';
+
+const BASEMAP_OPTIONS = [
+  { key: 'vworld', label: 'VWorld', url: VWORLD_URL || OSM_URL, attr: VWORLD_URL ? VWORLD_ATTR : OSM_ATTR },
+  { key: 'osm', label: 'OSM', url: OSM_URL, attr: OSM_ATTR },
+  { key: 'gray', label: '회색조', url: GRAY_URL, attr: GRAY_ATTR },
+];
+
+// ===== 순수 SVG 차트 (Recharts 미사용 — unpkg UMD 빌드 불안정 문제로 직접 구현) =====
+
+// 가로 막대차트
+function HBarChart({ data, color, height = 220, valueFormat = (v) => `${v}%` }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const labelW = 130;
+  const chartW = 320;
+  const rowH = Math.min(28, (height - 10) / data.length);
+  return (
+    <svg viewBox={`0 0 ${labelW + chartW + 50} ${data.length * rowH + 10}`} width="100%" style={{ display: 'block' }}>
+      {data.map((d, i) => {
+        const w = (d.value / max) * chartW;
+        const y = i * rowH + 4;
+        const barColor = typeof color === 'function' ? color(d, i) : color;
+        return (
+          <g key={d.name}>
+            <text x={labelW - 8} y={y + rowH * 0.42} textAnchor="end" fontSize="12" fill="var(--color-ink-soft)" fontFamily="Pretendard">
+              {d.name}
+            </text>
+            <rect x={labelW} y={y} width={Math.max(w, 2)} height={rowH * 0.62} rx="5" fill={barColor} />
+            <text x={labelW + Math.max(w, 2) + 8} y={y + rowH * 0.42} fontSize="11.5" fill="var(--color-ink-soft)" fontFamily="Pretendard">
+              {valueFormat(d.value)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// 도넛차트
+function DonutChart({ data, palette, size = 200 }) {
+  const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const r = size / 2 - 8;
+  const innerR = r * 0.6;
+  const cx = size / 2;
+  const cy = size / 2;
+  let angle = -90;
+  const arcs = data.map((d, i) => {
+    const sweep = (d.value / total) * 360;
+    const startAngle = angle;
+    const endAngle = angle + sweep;
+    angle = endAngle;
+    const toXY = (a, rad) => [cx + rad * Math.cos((a * Math.PI) / 180), cy + rad * Math.sin((a * Math.PI) / 180)];
+    const [x1, y1] = toXY(startAngle, r);
+    const [x2, y2] = toXY(endAngle, r);
+    const [ix1, iy1] = toXY(endAngle, innerR);
+    const [ix2, iy2] = toXY(startAngle, innerR);
+    const largeArc = sweep > 180 ? 1 : 0;
+    const path = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix2} ${iy2} Z`;
+    return { path, color: palette[i % palette.length], name: d.name, value: d.value };
+  });
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {arcs.map((a, i) => (
+          <path key={i} d={a.path} fill={a.color} stroke="var(--color-surface)" strokeWidth="1.5" />
+        ))}
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {arcs.map((a, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--color-ink-soft)' }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: a.color, display: 'inline-block', flexShrink: 0 }} />
+            {a.name} ({a.value}%)
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 선그래프 (두 시리즈 비교)
+function LineCompareChart({ data, xKey, seriesA, seriesB, height = 280 }) {
+  const width = 600;
+  const padL = 56, padR = 16, padT = 16, padB = 36;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  const allVals = data.flatMap((d) => [d[seriesA.key], d[seriesB.key]]);
+  const maxV = Math.max(...allVals, 1);
+  const xVals = data.map((d) => d[xKey]);
+  const minX = Math.min(...xVals), maxX = Math.max(...xVals);
+
+  const xPos = (x) => padL + ((x - minX) / (maxX - minX || 1)) * innerW;
+  const yPos = (v) => padT + innerH - (v / maxV) * innerH;
+
+  const pathFor = (key) => data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xPos(d[xKey])} ${yPos(d[key])}`).join(' ');
+
+  const yTicks = 4;
+  const fmtY = (v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: 'block' }}>
+        {Array.from({ length: yTicks + 1 }).map((_, i) => {
+          const v = (maxV / yTicks) * i;
+          const y = yPos(v);
+          return (
+            <g key={i}>
+              <line x1={padL} x2={width - padR} y1={y} y2={y} stroke="var(--color-line)" strokeDasharray="3 3" />
+              <text x={padL - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--color-ink-soft)" fontFamily="Pretendard">{fmtY(v)}</text>
+            </g>
+          );
+        })}
+        {xVals.map((x, i) => (
+          <text key={i} x={xPos(x)} y={height - padB + 16} textAnchor="middle" fontSize="11" fill="var(--color-ink-soft)" fontFamily="Pretendard">{x}</text>
+        ))}
+        <path d={pathFor(seriesA.key)} fill="none" stroke={seriesA.color} strokeWidth="2.5" />
+        <path d={pathFor(seriesB.key)} fill="none" stroke={seriesB.color} strokeWidth="2.5" />
+        {data.map((d, i) => (
+          <g key={i}>
+            <circle cx={xPos(d[xKey])} cy={yPos(d[seriesA.key])} r="3.5" fill={seriesA.color} />
+            <circle cx={xPos(d[xKey])} cy={yPos(d[seriesB.key])} r="3.5" fill={seriesB.color} />
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12.5, color: 'var(--color-ink-soft)' }}>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: seriesA.color, marginRight: 5 }} />{seriesA.label}</span>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: seriesB.color, marginRight: 5 }} />{seriesB.label}</span>
+      </div>
+    </div>
+  );
+}
+
+// 공지율(미건축 비율) 가로 진행률 바 — 격자보다 직관적이고 답답하지 않은 시각화
+function VacantLotGrid({ ratio, color, label }) {
+  const built = Math.round((100 - ratio) * 10) / 10;
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontSize: 13, color: 'var(--color-ink-soft)' }}>{label}</span>
+        <span style={{ fontSize: 13, color: 'var(--color-ink-soft)' }}>
+          공지(미건축) <b className="mono-num" style={{ color, fontSize: 15 }}>{ratio}%</b>
+        </span>
+      </div>
+      <div style={{ position: 'relative', height: 14, borderRadius: 7, background: '#f1e4e8', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${built}%`, background: color, borderRadius: 7, transition: 'width 0.3s' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12 }}>
+        <span style={{ color: 'var(--color-ink-soft)' }}>
+          <span style={{ display: 'inline-block', width: 9, height: 9, background: color, borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />건축됨 {built}%
+        </span>
+        <span style={{ color: 'var(--color-ink-soft)' }}>
+          <span style={{ display: 'inline-block', width: 9, height: 9, background: '#f1e4e8', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />나대지 {ratio}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// 듀얼 막대 — 두 값이 거의 같음을 강조하는 비교 막대
+function DualBar({ labelA, valueA, labelB, valueB, colorA, colorB, max, unit = '%' }) {
+  const m = max || Math.max(valueA, valueB) * 1.15;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {[{ label: labelA, value: valueA, color: colorA }, { label: labelB, value: valueB, color: colorB }].map((d) => (
+        <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12.5, color: 'var(--color-ink-soft)', width: 92, flexShrink: 0 }}>{d.label}</span>
+          <div style={{ flex: 1, background: 'var(--color-bg)', borderRadius: 6, height: 18, overflow: 'hidden' }}>
+            <div style={{ width: `${(d.value / m) * 100}%`, height: '100%', background: d.color, borderRadius: 6, transition: 'width 0.6s ease' }} />
+          </div>
+          <span className="mono-num" style={{ fontSize: 13, color: d.color, width: 56, textAlign: 'right', flexShrink: 0 }}>{d.value}{unit}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 개발 타임라인 — 누적 준공 건물 수 계단형 곡선
+function DevelopmentTimeline({ timeline }) {
+  const width = 600, height = 220;
+  const padL = 40, padR = 16, padT = 16, padB = 30;
+  const innerW = width - padL - padR, innerH = height - padT - padB;
+
+  const allYears = [...timeline.pangyo.map((d) => d.year), ...timeline.gimpo.map((d) => d.year)];
+  const minYear = Math.min(...allYears), maxYear = Math.max(...allYears);
+  const maxCum = Math.max(...timeline.pangyo.map((d) => d.cumulative), ...timeline.gimpo.map((d) => d.cumulative));
+
+  const xPos = (y) => padL + ((y - minYear) / (maxYear - minYear || 1)) * innerW;
+  const yPos = (v) => padT + innerH - (v / maxCum) * innerH;
+
+  const stepPath = (series) => {
+    let path = '';
+    let prevY = null;
+    series.forEach((d, i) => {
+      const x = xPos(d.year);
+      const y = yPos(d.cumulative);
+      if (i === 0) {
+        path += `M ${x} ${height - padB} L ${x} ${y}`;
+      } else {
+        path += ` L ${x} ${prevY} L ${x} ${y}`;
+      }
+      prevY = y;
+    });
+    path += ` L ${xPos(maxYear)} ${prevY}`;
+    return path;
+  };
+
+  const yearTicks = [];
+  for (let y = minYear; y <= maxYear; y += 2) yearTicks.push(y);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: 'block' }}>
+        {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
+          const v = maxCum * f;
+          const y = yPos(v);
+          return (
+            <g key={i}>
+              <line x1={padL} x2={width - padR} y1={y} y2={y} stroke="var(--color-line)" strokeDasharray="3 3" />
+              <text x={padL - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--color-ink-soft)" fontFamily="Pretendard">{Math.round(v)}</text>
+            </g>
+          );
+        })}
+        {yearTicks.map((y) => (
+          <text key={y} x={xPos(y)} y={height - padB + 18} textAnchor="middle" fontSize="10.5" fill="var(--color-ink-soft)" fontFamily="Pretendard">{y}</text>
+        ))}
+        <path d={stepPath(timeline.pangyo)} fill="none" stroke="#c2356b" strokeWidth="2.5" />
+        <path d={stepPath(timeline.gimpo)} fill="none" stroke="#e8917a" strokeWidth="2.5" />
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 12.5, color: 'var(--color-ink-soft)' }}>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#c2356b', marginRight: 5 }} />판교 (2009~2016, 7년간 64건)</span>
+        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#e8917a', marginRight: 5 }} />김포 (2019~2025, 6년간 26건)</span>
+      </div>
+    </div>
+  );
+}
+
+// 공실 근거 인용 카드
+function VacancyEvidenceCard({ evidence }) {
+  return (
+    <div className="card">
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 14 }}>"저조"의 근거 — 언론보도 인용</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {evidence.map((e, i) => (
+          <div key={i} style={{ borderLeft: '3px solid var(--color-gimpo)', paddingLeft: 14 }}>
+            <p style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 4 }}>{e.text}</p>
+            <p style={{ fontSize: 11.5, color: 'var(--color-ink-soft)' }}>— {e.source}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ===== 데이터 로딩 훅 =====
+function useJsonData(paths) {
+  const [data, setData] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    Promise.all(
+      Object.entries(paths).map(([key, path]) =>
+        fetch(path).then((r) => r.json()).then((json) => [key, json])
+      )
+    ).then((entries) => {
+      setData(Object.fromEntries(entries));
+      setLoaded(true);
+    });
+  }, []);
+  return { data, loaded };
+}
+
+// ===== 지도 =====
+// dataset: 'parcel_use'(건축물 주용도) | 'zoning'(법정 용도지역) | 'iso30' | 'iso60'
+function LeafletMap({ id, center, stationLatLng, boundaryGeo, parcelGeo, zoningGeo, isoGeo30, isoGeo60, stationTimesGeo, stationRoutesGeo, dataset, color, basemap, opacity, industryComposition }) {
+  const mapRef = React.useRef(null);
+  const leafletRef = React.useRef(null);
+  const tileLayerRef = React.useRef(null);
+  const boundaryLayerRef = React.useRef(null);
+  const dataLayerRef = React.useRef(null);
+  const stationCircleRef = React.useRef(null);
+  const stationMarkersRef = React.useRef(null);
+  const stationRoutesRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!leafletRef.current) {
+      const map = L.map(mapRef.current, { scrollWheelZoom: false }).setView(center, 15);
+      leafletRef.current = map;
+      setTimeout(() => map.invalidateSize(), 0);
+    }
+  }, []);
+
+  // 부모 컨테이너 크기 변화(뷰모드 전환, 윈도우 리사이즈 등) 감지하여 지도 크기 갱신
+  useEffect(() => {
+    const map = leafletRef.current;
+    const container = mapRef.current;
+    if (!map || !container) return;
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
+  // 베이스맵 전환
+  useEffect(() => {
+    const map = leafletRef.current;
+    if (!map) return;
+    if (tileLayerRef.current) map.removeLayer(tileLayerRef.current);
+    const bm = BASEMAP_OPTIONS.find((b) => b.key === basemap) || BASEMAP_OPTIONS[0];
+    tileLayerRef.current = L.tileLayer(bm.url, { attribution: bm.attr, maxZoom: 19 }).addTo(map);
+  }, [basemap]);
+
+  // 경계 윤곽선은 항상 표시 (어떤 데이터셋을 보든 기준이 되도록)
+  useEffect(() => {
+    const map = leafletRef.current;
+    if (!map || !boundaryGeo) return;
+    if (boundaryLayerRef.current) map.removeLayer(boundaryLayerRef.current);
+    boundaryLayerRef.current = L.geoJSON(boundaryGeo, {
+      style: { color, weight: 2.5, fillColor: color, fillOpacity: 0.03, dashArray: '0' },
+    }).addTo(map);
+  }, [boundaryGeo]);
+
+  // 핵심역 중심 1km 원형(역세권) — 교통망 데이터셋에서 표시
+  useEffect(() => {
+    const map = leafletRef.current;
+    if (!map) return;
+    if (stationCircleRef.current) { map.removeLayer(stationCircleRef.current); stationCircleRef.current = null; }
+    if (dataset === 'transit_radius' && stationLatLng) {
+      stationCircleRef.current = L.layerGroup([
+        L.circle(stationLatLng, { radius: 500, color: '#d4a72c', weight: 1.5, fillColor: '#d4a72c', fillOpacity: 0.12 }),
+        L.circle(stationLatLng, { radius: 1000, color: color, weight: 1.5, fillColor: color, fillOpacity: 0.08 }),
+        L.marker(stationLatLng),
+      ]).addTo(map);
+    }
+  }, [dataset, stationLatLng]);
+
+  useEffect(() => {
+    const map = leafletRef.current;
+    if (!map) return;
+    if (dataLayerRef.current) { map.removeLayer(dataLayerRef.current); dataLayerRef.current = null; }
+    if (stationMarkersRef.current) { map.removeLayer(stationMarkersRef.current); stationMarkersRef.current = null; }
+    if (stationRoutesRef.current) { map.removeLayer(stationRoutesRef.current); stationRoutesRef.current = null; }
+
+    if (dataset === 'parcel_use' && parcelGeo) {
+      map.setView(center, 15);
+      dataLayerRef.current = L.geoJSON(parcelGeo, {
+        style: (feature) => {
+          const use = feature.properties.주용도;
+          const fillColor = useColor(use);
+          return {
+            color: use === '나대지' ? '#cbb' : '#7a2a45',
+            weight: 0.8,
+            fillColor,
+            fillOpacity: use === '나대지' ? opacity * 0.45 : opacity,
+          };
+        },
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties;
+          const hasBuilding = p.연면적 > 0;
+          const buildingInfo = hasBuilding
+            ? '연면적: ' + p.연면적.toLocaleString() + '㎡<br/>건폐율: ' + p.건폐율 + '% · 용적률: ' + p.용적률 + '%<br/>지상 ' + p.지상층수 + '층'
+            : '미건축 필지';
+          const popupHtml = '<div style="font-family:\'Pretendard\',sans-serif; font-size:13px; line-height:1.6; min-width:180px;">'
+            + '<b style="font-size:14px;">' + p.건물명 + '</b><br/>'
+            + '<span style="color:#8a6b75;">지번 ' + p.JIBUN + '</span><br/>'
+            + '주용도: <b>' + p.주용도 + '</b><br/>'
+            + '대지면적: ' + p.area_m2.toLocaleString() + '㎡<br/>'
+            + buildingInfo
+            + '</div>';
+          layer.bindPopup(popupHtml);
+          layer.on('mouseover', () => layer.setStyle({ weight: 2.5 }));
+          layer.on('mouseout', () => layer.setStyle({ weight: 1 }));
+        },
+      }).addTo(map);
+    } else if (dataset === 'zoning' && zoningGeo) {
+      map.setView(center, 15);
+      dataLayerRef.current = L.geoJSON(zoningGeo, {
+        style: (feature) => ({
+          color: '#7a2a45',
+          weight: 0.6,
+          fillColor: zoneColor(feature.properties.blockType),
+          fillOpacity: opacity,
+        }),
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties;
+          const popupHtml = '<div style="font-family:\'Pretendard\',sans-serif; font-size:13px; line-height:1.6;">'
+            + '<b>' + (p.blockType || '미분류') + '</b><br/>'
+            + '<span style="color:#8a6b75;">' + (p.zoneName || '') + '</span>'
+            + '</div>';
+          layer.bindPopup(popupHtml);
+        },
+      }).addTo(map);
+    } else if ((dataset === 'iso30' || dataset === 'iso60')) {
+      const isoGeo = dataset === 'iso30' ? isoGeo30 : isoGeo60;
+      if (isoGeo) {
+        map.setView(center, 10);
+        const isoColor = dataset === 'iso30' ? '#e8917a' : '#c2356b';
+        dataLayerRef.current = L.geoJSON(isoGeo, {
+          style: { color: isoColor, weight: 1, fillColor: isoColor, fillOpacity: opacity * 0.12, dashArray: '4,3' },
+        }).addTo(map);
+      }
+      // 경로선 (핵심역 → 도달역). 기본은 옅게, 역 클릭 시 해당 경로만 강조
+      const BAND_COLOR = { '10': '#06b6d4', '20': '#22c55e', '30': '#f59e0b', '45': '#f97316', '60': '#ef4444' };
+      const routeLayersByStation = {};
+      if (stationRoutesGeo) {
+        const cap = dataset === 'iso30' ? 30 : 60;
+        const filtered = {
+          ...stationRoutesGeo,
+          features: stationRoutesGeo.features.filter((f) => f.properties.travel_min <= cap),
+        };
+        stationRoutesRef.current = L.geoJSON(filtered, {
+          style: { color: '#c9b8bd', weight: 1, opacity: 0.35 },
+          onEachFeature: (feature, layer) => {
+            const p = feature.properties;
+            routeLayersByStation[p.statnm] = { layer, band: p.band, travelMin: p.travel_min };
+            layer.bindTooltip(`${p.statnm} — ${p.travel_min}분`, { sticky: true });
+          },
+        }).addTo(map);
+      }
+      const resetAllRoutes = () => {
+        Object.values(routeLayersByStation).forEach(({ layer }) => {
+          layer.setStyle({ color: '#c9b8bd', weight: 1, opacity: 0.35 });
+          if (layer.bringToBack) layer.bringToBack();
+        });
+      };
+      const highlightRoute = (statnm) => {
+        resetAllRoutes();
+        const entry = routeLayersByStation[statnm];
+        if (entry) {
+          entry.layer.setStyle({ color: BAND_COLOR[entry.band] || color, weight: 3.5, opacity: 0.9 });
+          entry.layer.bringToFront();
+        }
+      };
+      // 핵심역 + 도달역 마커
+      if (stationTimesGeo) {
+        const cap = dataset === 'iso30' ? 30 : 60;
+        const filtered = {
+          ...stationTimesGeo,
+          features: stationTimesGeo.features.filter((f) => f.properties.travel_min <= cap),
+        };
+        stationMarkersRef.current = L.geoJSON(filtered, {
+          pointToLayer: (feature, latlng) => {
+            const p = feature.properties;
+            const r = p.is_core ? 7 : 3.5;
+            const fill = p.is_core ? '#f5c518' : '#22c55e';
+            return L.circleMarker(latlng, {
+              radius: r, color: '#fff', weight: 1.2, fillColor: fill, fillOpacity: 0.95,
+            });
+          },
+          onEachFeature: (feature, layer) => {
+            const p = feature.properties;
+            const label = p.is_core ? `${p.statnm} (핵심역)` : `${p.statnm} (${p.linenm}) — ${p.travel_min}분`;
+            layer.bindTooltip(label, { direction: 'top', offset: [0, -6] });
+            layer.bindPopup(
+              `<div style="font-family:'Pretendard',sans-serif; font-size:13px; line-height:1.6;">`
+              + `<b>${p.statnm}</b><br/>`
+              + `<span style="color:#8a6b75;">${p.linenm}</span><br/>`
+              + (p.is_core ? '핵심역 (출발점)' : `핵심역에서 <b>${p.travel_min}분</b>`)
+              + `</div>`
+            );
+            if (!p.is_core) {
+              layer.on('mouseover', () => highlightRoute(p.statnm));
+              layer.on('click', () => highlightRoute(p.statnm));
+            }
+          },
+        }).addTo(map);
+      }
+    } else if (dataset === 'transit_radius') {
+      map.setView(center, 14);
+    } else if (dataset === 'industry' && boundaryGeo && industryComposition) {
+      map.setView(center, 15);
+      const entries = Object.entries(industryComposition).sort((a, b) => b[1] - a[1]);
+      const topIndustry = entries[0] ? entries[0][0] : '';
+      const topPct = entries[0] ? entries[0][1] : 0;
+      const popupRows = entries.map(([name, pct]) => `${name}: ${pct}%`).join('<br/>');
+      dataLayerRef.current = L.geoJSON(boundaryGeo, {
+        style: { color, weight: 2, fillColor: color, fillOpacity: opacity * 0.5 },
+        onEachFeature: (feature, layer) => {
+          const popupHtml = '<div style="font-family:\'Pretendard\',sans-serif; font-size:13px; line-height:1.7; min-width:200px;">'
+            + '<b style="font-size:14px;">1위 업종: ' + topIndustry + ' (' + topPct + '%)</b><br/>'
+            + '<span style="color:#8a6b75; font-size:11.5px;">SGIS 10차 산업분류, 면적비례 배분 추정값</span><hr style="margin:6px 0; border-color:#f3dde4;"/>'
+            + popupRows
+            + '</div>';
+          layer.bindPopup(popupHtml);
+        },
+      }).addTo(map);
+    }
+  }, [dataset, parcelGeo, zoningGeo, isoGeo30, isoGeo60, stationTimesGeo, stationRoutesGeo, opacity, industryComposition]);
+
+  return <div id={id} ref={mapRef} style={{ height: '100%', width: '100%' }} />;
+}
+
+function BasemapSelect({ basemap, setBasemap }) {
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {BASEMAP_OPTIONS.map((b) => (
+        <button key={b.key} className={`pill-btn ${basemap === b.key ? 'active' : ''}`} onClick={() => setBasemap(b.key)}>
+          {b.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OpacitySlider({ opacity, setOpacity }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-ink-soft)' }}>
+      <span>투명도</span>
+      <input
+        type="range" min="0.1" max="1" step="0.05" value={opacity}
+        onChange={(e) => setOpacity(parseFloat(e.target.value))}
+        style={{ width: 80, accentColor: 'var(--color-pangyo)' }}
+      />
+      <span style={{ width: 28 }}>{Math.round(opacity * 100)}%</span>
+    </div>
+  );
+}
+
+const DATASET_OPTIONS = [
+  { key: 'parcel_use', label: '건축물 주용도' },
+  { key: 'zoning', label: '법정 용도지역' },
+  { key: 'industry', label: '종사자 업종분류' },
+  { key: 'transit_radius', label: '핵심역 반경(500m/1km)' },
+  { key: 'iso30', label: '30분 등시간권' },
+  { key: 'iso60', label: '60분 등시간권' },
+];
+
+function DatasetSelect({ dataset, setDataset }) {
+  return (
+    <select
+      value={dataset}
+      onChange={(e) => setDataset(e.target.value)}
+      style={{
+        fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 10,
+        border: '1px solid var(--color-line)', background: 'var(--color-surface)',
+        color: 'var(--color-ink)', cursor: 'pointer',
+      }}
+    >
+      {DATASET_OPTIONS.map((o) => (
+        <option key={o.key} value={o.key}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
+function DynamicLegend({ dataset }) {
+  if (dataset === 'parcel_use') {
+    const items = ['업무시설', '교육연구시설', '공장', '창고시설', '공동주택', '자동차관련시설', '나대지'];
+    return (
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--color-ink-soft)' }}>
+        {items.map((name) => (
+          <span key={name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: useColor(name), display: 'inline-block' }} />
+            {name}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  if (dataset === 'zoning') {
+    const items = ['도시지원시설용지/자족기능확보시설', '도로', '녹지·공원', '주차장', '기타'];
+    const colors = ['#c2356b', '#9aa0a8', '#5a8a5e', '#9b8a7a', '#cfb8c0'];
+    return (
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--color-ink-soft)' }}>
+        {items.map((name, i) => (
+          <span key={name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: colors[i], display: 'inline-block' }} />
+            {name}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  if (dataset === 'industry') {
+    return (
+      <span style={{ fontSize: 12, color: 'var(--color-ink-soft)' }}>
+        구역을 클릭하면 종사자 업종 구성(SGIS 10차 산업분류)이 표시된다. 색상은 지역 구분용이며 업종별 색상이 아니다.
+      </span>
+    );
+  }
+  if (dataset === 'transit_radius') {
+    return (
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--color-ink-soft)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#d4a72c', display: 'inline-block' }} />
+          500m 반경 (도보 역세권)
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#c2356b', display: 'inline-block' }} />
+          1km 반경 (등시간권 산출 기준)
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: 12, color: 'var(--color-ink-soft)' }}>
+        핵심역에서 지하철로 {dataset === 'iso30' ? '30분' : '60분'} 이내 도달 가능한 역들. 도달역을 클릭(또는 마우스 오버)하면 핵심역까지의 실제 경로가 소요시간대 색으로 강조된다.
+      </span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 11.5, color: 'var(--color-ink-soft)' }}>
+        {[['#06b6d4', '10분 이내'], ['#22c55e', '20분 이내'], ['#f59e0b', '30분 이내'], ['#f97316', '45분 이내'], ['#ef4444', '60분 이내']].map(([c, label]) => (
+          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 14, height: 3, background: c, display: 'inline-block', borderRadius: 2 }} />
+            {label}
+          </span>
+        ))}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#f5c518', display: 'inline-block' }} />핵심역
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />도달역
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function IsoMiniStat({ region, dataset, color }) {
+  if (dataset !== 'iso30' && dataset !== 'iso60') return null;
+  const t = region.transport;
+  const pop = dataset === 'iso30' ? t.isochrone_30min_population : t.isochrone_60min_population;
+  const emp = dataset === 'iso30' ? t.isochrone_30min_employment : t.isochrone_60min_employment;
+  const stations = dataset === 'iso30' ? t.isochrone_30min_stations : t.isochrone_60min_stations;
+  return (
+    <div style={{
+      display: 'flex', gap: 16, fontSize: 12.5, color: 'var(--color-ink-soft)',
+      background: 'var(--color-bg)', borderRadius: 10, padding: '8px 12px', marginTop: 8,
+    }}>
+      <span>도달역 <b className="mono-num" style={{ color }}>{stations}</b>개</span>
+      <span>도달인구 <b className="mono-num" style={{ color }}>{pop.toLocaleString()}</b>명</span>
+      <span>도달종사자 <b className="mono-num" style={{ color }}>{emp.toLocaleString()}</b>명</span>
+    </div>
+  );
+}
+
+function ViewModeSelect({ viewMode, setViewMode }) {
+  const options = [
+    { key: 'side', label: '나란히' },
+    { key: 'pangyo', label: '판교만' },
+    { key: 'gimpo', label: '김포한강신도시만' },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {options.map((o) => (
+        <button key={o.key} className={`pill-btn ${viewMode === o.key ? 'active' : ''}`} onClick={() => setViewMode(o.key)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MapPanel({ geo, region, name, area, center, stationLatLng, dataset, color, basemap, opacity, statRegion, industryComposition }) {
+  return (
+    <div style={{ flex: '1 1 320px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600 }}>{name}</h3>
+        <span style={{ fontSize: 13, color: 'var(--color-ink-soft)' }}>경계 면적 <b className="mono-num">{area}</b></span>
+      </div>
+      <div style={{ height: 420, borderRadius: 'var(--radius-card)', overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <LeafletMap
+          id={`map-${region}`} center={center} stationLatLng={stationLatLng}
+          boundaryGeo={geo.boundaryGeo} parcelGeo={geo.parcelGeo} zoningGeo={geo.zoningGeo}
+          isoGeo30={geo.isoGeo30} isoGeo60={geo.isoGeo60} stationTimesGeo={geo.stationTimesGeo} stationRoutesGeo={geo.stationRoutesGeo}
+          dataset={dataset} color={color} basemap={basemap} opacity={opacity}
+          industryComposition={industryComposition}
+        />
+      </div>
+      <IsoMiniStat region={statRegion} dataset={dataset} color={color} />
+    </div>
+  );
+}
+
+function ComparisonMap({ geo, pangyo, gimpo }) {
+  const [dataset, setDataset] = useState('parcel_use');
+  const [viewMode, setViewMode] = useState('side');
+  const [basemap, setBasemap] = useState('vworld');
+  const [opacity, setOpacity] = useState(0.65);
+
+  const showPangyo = viewMode !== 'gimpo';
+  const showGimpo = viewMode !== 'pangyo';
+
+  return (
+    <div className="card" style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
+        <DynamicLegend dataset={dataset} />
+        <DatasetSelect dataset={dataset} setDataset={setDataset} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10, paddingBottom: 12, borderBottom: '1px solid var(--color-line)' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <ViewModeSelect viewMode={viewMode} setViewMode={setViewMode} />
+          <BasemapSelect basemap={basemap} setBasemap={setBasemap} />
+        </div>
+        <OpacitySlider opacity={opacity} setOpacity={setOpacity} />
+      </div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        {showPangyo && (
+          <MapPanel
+            geo={{ boundaryGeo: geo.pangyo_final, parcelGeo: geo.pangyo_parcels, zoningGeo: geo.pangyo_zoning, isoGeo30: geo.pangyo_iso30, isoGeo60: geo.pangyo_iso60, stationTimesGeo: geo.pangyo_station_times, stationRoutesGeo: geo.pangyo_station_routes }}
+            region="pangyo" name="판교테크노밸리 (제1판교)" area="67.25ha" center={PANGYO_CENTER} stationLatLng={PANGYO_STATION}
+            dataset={dataset} color="#c2356b" basemap={basemap} opacity={opacity} statRegion={pangyo}
+            industryComposition={pangyo.sociodemo.industry_composition}
+          />
+        )}
+        {showGimpo && (
+          <MapPanel
+            geo={{ boundaryGeo: geo.gimpo_jazok_final, parcelGeo: geo.gimpo_parcels, zoningGeo: geo.gimpo_zoning, isoGeo30: geo.gurae_iso30, isoGeo60: geo.gurae_iso60, stationTimesGeo: geo.gimpo_station_times, stationRoutesGeo: geo.gimpo_station_routes }}
+            region="gimpo" name="김포한강신도시 자족시설용지" area="17.35ha" center={GIMPO_CENTER} stationLatLng={GURAE_STATION}
+            dataset={dataset} color="#e8917a" basemap={basemap} opacity={opacity} statRegion={gimpo}
+            industryComposition={gimpo.sociodemo.industry_composition}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===== 직주비 도넛 링 =====
+function RatioRing({ count, total, color, label, size = 92 }) {
+  const r = size / 2 - 7;
+  const circumference = 2 * Math.PI * r;
+  const pct = total > 0 ? count / total : 0;
+  const dash = circumference * Math.min(pct, 1);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="9" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="9"
+          strokeDasharray={`${dash} ${circumference}`} strokeLinecap="round"
+          style={{ transition: 'stroke-dasharray 0.4s' }}
+        />
+      </svg>
+      <span style={{ fontSize: 13, color: 'var(--color-ink-soft)', textAlign: 'center' }}>{label}</span>
+    </div>
+  );
+}
+
+function JobHousingPictogram({ region, color }) {
+  const { population, employment, job_housing_ratio, households, avg_household_size } = region.sociodemo;
+  const total = population + employment;
+  return (
+    <div className="card" style={{ flex: '1 1 320px' }}>
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 4 }}>{region.name}</h3>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 16 }}>
+        <span className="mono-num" style={{ fontSize: 40, color }}>{job_housing_ratio}</span>
+        <span style={{ fontSize: 14, color: 'var(--color-ink-soft)' }}>직주비 (종사자/인구)</span>
+      </div>
+      <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', marginBottom: 16 }}>
+        <RatioRing count={employment} total={total} color={color} label={`종사자 ${employment.toLocaleString()}명`} />
+        <RatioRing count={population} total={total} color="var(--color-ink-soft)" label={`거주인구 ${population.toLocaleString()}명`} />
+      </div>
+      {households != null && (
+        <p style={{ fontSize: 12.5, color: 'var(--color-ink-soft)', borderTop: '1px solid var(--color-line)', paddingTop: 10 }}>
+          가구수 <b className="mono-num">{households.toLocaleString()}</b>가구 · 가구당 평균 <b className="mono-num">{avg_household_size}</b>명
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ===== 산업분류 구성 =====
+function IndustryChart({ region, color }) {
+  const data = Object.entries(region.sociodemo.industry_composition)
+    .map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  return (
+    <div className="card" style={{ flex: '1 1 320px' }}>
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 12 }}>{region.name} · 종사자 산업분류 구성</h3>
+      <HBarChart data={data} color={color} />
+      <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginTop: 8 }}>SGIS 10차 산업분류 대분류, 종사자수 기준 (2023)</p>
+    </div>
+  );
+}
+
+// ===== 토지이용 =====
+function LandUseChart({ region }) {
+  const data = Object.entries(region.landuse.use_composition).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value }));
+  return (
+    <div className="card" style={{ flex: '1 1 320px' }}>
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 12 }}>{region.name} · 건축물 주용도 구성비</h3>
+      <DonutChart data={data} palette={PALETTE} />
+      <div style={{ display: 'flex', gap: 20, marginTop: 16, fontSize: 13, color: 'var(--color-ink-soft)', flexWrap: 'wrap' }}>
+        <span>용적률 <b className="mono-num">{region.landuse.far_percent}%</b></span>
+        <span>공지율 <b className="mono-num">{region.landuse.vacant_lot_ratio_percent}%</b></span>
+        <span>혼합도(LUM) <b className="mono-num">{region.landuse.lum_entropy}</b></span>
+      </div>
+    </div>
+  );
+}
+
+function ZoningChart({ region, color }) {
+  const data = Object.entries(region.landuse.zoning_composition).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  return (
+    <div className="card" style={{ flex: '1 1 320px' }}>
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 4 }}>{region.name} · 법정 용도지역 구성</h3>
+      <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 12 }}>{region.landuse.zoning_source}</p>
+      <HBarChart data={data} color={color} />
+    </div>
+  );
+}
+
+// ===== 등시간권 지표 카드 =====
+function IsochroneStatCard({ region, color }) {
+  const t = region.transport;
+  return (
+    <div className="card" style={{ flex: '1 1 320px' }}>
+      <h3 style={{ fontSize: 16, color: 'var(--color-ink-soft)', fontWeight: 600, marginBottom: 16 }}>{region.name} · {region.core_station}</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>30분 이내 도달종사자</p>
+          <p className="mono-num" style={{ fontSize: 24, color }}>{t.isochrone_30min_employment.toLocaleString()}</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>60분 이내 도달종사자</p>
+          <p className="mono-num" style={{ fontSize: 24, color }}>{t.isochrone_60min_employment.toLocaleString()}</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>30분 이내 도달역</p>
+          <p className="mono-num" style={{ fontSize: 18, color }}>{t.isochrone_30min_stations}개</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>60분 이내 도달역</p>
+          <p className="mono-num" style={{ fontSize: 18, color }}>{t.isochrone_60min_stations}개</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>도로망 밀도</p>
+          <p style={{ fontSize: 18, color, whiteSpace: 'nowrap' }}>
+            <span className="mono-num">{t.road_density_km_per_km2}</span>
+            <span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4 }}>km/km<sup style={{ fontSize: 9 }}>2</sup></span>
+          </p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>역세권(1km) 비율</p>
+          <p style={{ fontSize: 18, color }}>{t.station_catchment_ratio}%</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 12, color: 'var(--color-ink-soft)', marginBottom: 4 }}>버스정류장 밀도</p>
+          <p style={{ fontSize: 18, color, whiteSpace: 'nowrap' }}>
+            <span className="mono-num">{t.bus_stop_density}</span>
+            <span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4 }}>개/km<sup style={{ fontSize: 9 }}>2</sup></span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== 누적 접근성 곡선 =====
+function AccessibilityCurve({ curve }) {
+  const [metric, setMetric] = useState('employment');
+  const METRIC_LABEL = { employment: '도달가능 종사자수 (명)', population: '도달가능 인구 (명)', stations: '도달가능 역 수 (개)' };
+  const METRIC_BTN_LABEL = { employment: '종사자', population: '인구', stations: '역 수' };
+  const data = curve.pangyo.map((p, i) => ({ minutes: p.minutes, 판교: p[metric], 김포: curve.gurae[i][metric] }));
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {Object.entries(METRIC_BTN_LABEL).map(([key, label]) => (
+            <button key={key} className={`pill-btn ${metric === key ? 'active' : ''}`} onClick={() => setMetric(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--color-ink-soft)', marginBottom: 16 }}>
+        핵심역(판교역 / 구래역)에서 t분 이내 도달 가능한 누적 {METRIC_LABEL[metric].replace(/\(.*\)/, '')}
+      </p>
+      <LineCompareChart
+        data={data}
+        xKey="minutes"
+        seriesA={{ key: '판교', label: '판교', color: '#c2356b' }}
+        seriesB={{ key: '김포', label: '김포', color: '#e8917a' }}
+      />
+    </div>
+  );
+}
+
+// ===== 탭(아코디언) — 토지이용/교통망/인구사회 3개 영역을 펼치고 접기 =====
+function TabSection({ tabs }) {
+  const [active, setActive] = useState(0);
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', borderBottom: '1px solid var(--color-line)', paddingBottom: 0 }}>
+        {tabs.map((t, i) => (
+          <button
+            key={t.label}
+            onClick={() => setActive(i)}
+            style={{
+              fontSize: 14.5, fontWeight: 700, padding: '10px 18px',
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              color: active === i ? 'var(--color-pangyo)' : 'var(--color-ink-soft)',
+              borderBottom: active === i ? '3px solid var(--color-pangyo)' : '3px solid transparent',
+              marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div>{tabs[active].content}</div>
+    </div>
+  );
+}
+
+// 펼치고 접을 수 있는 보조 섹션 (탭 내부의 "추가 데이터")
+function Collapsible({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+          fontSize: 15, fontWeight: 600, color: 'var(--color-ink)',
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 13, color: 'var(--color-ink-soft)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+      </button>
+      {open && <div style={{ marginTop: 18 }}>{children}</div>}
+    </div>
+  );
+}
+
+// ===== App =====
+function App() {
+  const { data, loaded } = useJsonData({
+    stats: 'data/comparison_stats.json',
+    curve: 'data/cumulative_curve.json',
+    timeline: 'data/development_timeline.json',
+    pangyo_final: 'data/pangyo_final.geojson',
+    gimpo_jazok_final: 'data/gimpo_jazok_final.geojson',
+    pangyo_iso30: 'data/pangyo_iso30.geojson',
+    pangyo_iso60: 'data/pangyo_iso60.geojson',
+    gurae_iso30: 'data/gurae_iso30.geojson',
+    gurae_iso60: 'data/gurae_iso60.geojson',
+    pangyo_parcels: 'data/pangyo_parcels.geojson',
+    gimpo_parcels: 'data/gimpo_parcels.geojson',
+    pangyo_zoning: 'data/pangyo_zoning.geojson',
+    gimpo_zoning: 'data/gimpo_zoning.geojson',
+    pangyo_station_times: 'data/pangyo_station_times.geojson',
+    gimpo_station_times: 'data/gimpo_station_times.geojson',
+    pangyo_station_routes: 'data/pangyo_station_routes.geojson',
+    gimpo_station_routes: 'data/gimpo_station_routes.geojson',
+  });
+
+  if (!loaded) {
+    return <div style={{ padding: 80, textAlign: 'center', color: 'var(--color-ink-soft)' }}>불러오는 중...</div>;
+  }
+
+  const pangyo = { id: 'pangyo', ...data.stats.regions.pangyo };
+  const gimpo = { id: 'gimpo', ...data.stats.regions.gimpo };
+
+  const landUseTab = (
+    <div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+        <LandUseChart region={pangyo} />
+        <LandUseChart region={gimpo} />
+      </div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+        <ZoningChart region={pangyo} color="#c2356b" />
+        <ZoningChart region={gimpo} color="#e8917a" />
+      </div>
+      <Collapsible title="개발 실현 정도 — 용적률·공지율 자세히 보기" defaultOpen>
+        <p style={{ fontSize: 13, color: 'var(--color-ink-soft)', marginBottom: 20 }}>
+          지어진 건물만 보면 두 지역의 용적률은 거의 같다. 그러나 전체 필지 중 실제로 건물이 들어선 비율(공지율)은 크게 다르다.
+        </p>
+        <div style={{ marginBottom: 24 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>평균 용적률</p>
+          <DualBar
+            labelA="판교" valueA={pangyo.landuse.far_percent}
+            labelB="김포" valueB={gimpo.landuse.far_percent}
+            colorA="#c2356b" colorB="#e8917a" max={700}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 280px' }}>
+            <VacantLotGrid ratio={pangyo.landuse.vacant_lot_ratio_percent} color="#c2356b" label="판교" />
+          </div>
+          <div style={{ flex: '1 1 280px' }}>
+            <VacantLotGrid ratio={gimpo.landuse.vacant_lot_ratio_percent} color="#e8917a" label="김포" />
+          </div>
+        </div>
+      </Collapsible>
+      <Collapsible title="누적 개발 타임라인 — 준공 속도 비교">
+        <p style={{ fontSize: 13, color: 'var(--color-ink-soft)', marginBottom: 16 }}>
+          판교는 지정 후 7년 만에 핵심 건물 대부분이 들어섰지만, 김포는 6년이 지난 지금도 절반 수준에 머물러 있다.
+        </p>
+        <DevelopmentTimeline timeline={data.timeline} />
+      </Collapsible>
+      <Collapsible title={'"저조"의 근거 — 언론보도 인용'}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {data.stats.vacancy_evidence.map((e, i) => {
+            const content = (
+              <div style={{ borderLeft: '3px solid var(--color-gimpo)', paddingLeft: 14, cursor: e.url ? 'pointer' : 'default' }}>
+                <p style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 4 }}>{e.text}</p>
+                <p style={{ fontSize: 11.5, color: 'var(--color-ink-soft)' }}>
+                  — {e.source}{e.url && <span style={{ marginLeft: 6, color: 'var(--color-gimpo)' }}>↗ 원문 보기</span>}
+                </p>
+              </div>
+            );
+            return e.url ? (
+              <a key={i} href={e.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+                {content}
+              </a>
+            ) : (
+              <React.Fragment key={i}>{content}</React.Fragment>
+            );
+          })}
+        </div>
+      </Collapsible>
+    </div>
+  );
+
+  const transportTab = (
+    <div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+        <IsochroneStatCard region={pangyo} color="#c2356b" />
+        <IsochroneStatCard region={gimpo} color="#e8917a" />
+      </div>
+      <Collapsible title="누적 접근성 곡선 (0~60분)" defaultOpen>
+        <AccessibilityCurve curve={data.curve} />
+      </Collapsible>
+      <p style={{ fontSize: 12.5, color: 'var(--color-ink-soft)' }}>
+        등시간권 폴리곤은 위 지도(데이터셋 선택에서 "30분 등시간권"·"60분 등시간권")에서 직접 확인할 수 있다.
+      </p>
+    </div>
+  );
+
+  const socioTab = (
+    <div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+        <JobHousingPictogram region={pangyo} color="#c2356b" />
+        <JobHousingPictogram region={gimpo} color="#e8917a" />
+      </div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        <IndustryChart region={pangyo} color="#c2356b" />
+        <IndustryChart region={gimpo} color="#e8917a" />
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 1080, margin: '0 auto', padding: '48px 24px 96px' }}>
+      <header style={{ marginBottom: 40 }}>
+        <p style={{ fontSize: 13, color: 'var(--color-pangyo)', fontWeight: 700, marginBottom: 8 }}>데이터로 진단하는 업무지구의 성공과 실패</p>
+        <h1 style={{ fontSize: 36, lineHeight: 1.3, marginBottom: 16 }}>같은 용적률, 다른 운명 —<br />판교 vs 김포한강 자족용지</h1>
+        <p style={{ fontSize: 15, color: 'var(--color-ink-soft)', maxWidth: 640 }}>
+          두 업무지구는 평균 용적률이 거의 같다(660% vs 658%). 그러나 직주비는{' '}
+          <b style={{ color: 'var(--color-pangyo)' }}>174.2</b> 대 <b style={{ color: 'var(--color-gimpo)' }}>0.7</b>로 정반대다.
+          핵심역에서 30분 이내 닿는 종사자 수는 <b style={{ color: 'var(--color-pangyo)' }}>약 126만명</b> 대{' '}
+          <b style={{ color: 'var(--color-gimpo)' }}>약 4.3만명</b>으로 29배 차이난다.
+        </p>
+      </header>
+
+      <section style={{ marginBottom: 40 }}>
+        <ComparisonMap geo={data} pangyo={pangyo} gimpo={gimpo} />
+      </section>
+
+      <section style={{ marginBottom: 40 }}>
+        <TabSection
+          tabs={[
+            { label: '토지이용', content: landUseTab },
+            { label: '교통망', content: transportTab },
+            { label: '인구사회', content: socioTab },
+          ]}
+        />
+      </section>
+
+      <footer style={{ fontSize: 12, color: 'var(--color-ink-soft)', borderTop: '1px solid var(--color-line)', paddingTop: 20 }}>
+        데이터 출처: 건축HUB 건축물대장, VWorld 계열 토지이용계획도(경기도), SGIS 통계지리정보서비스(2024 인구·2023 사업체),
+        수도권 지하철 네트워크 데이터(2026-05 기준), OpenStreetMap(도로망) · 등시간권 인구·종사자는 역 1km 버퍼와 시군구 경계 면적비례 배분으로 산출 ·
+        가천대학교 스마트시티학과 기말과제
+      </footer>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+

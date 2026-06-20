@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "기준연도": {
+      "구역계": "2026-05",
+      "건축물대장": "2026-06 스냅샷 (사용승인일 2024-12-31 이전 필터링)",
+      "토지이용": "2026-06",
+      "인구": "2024",
+      "종사자": "2023",
+      "지하철망": "2026-05"
+    },
+    "isochrone_method": "다익스트라 최단시간 탐색 (subway_network.zip) + 도달역 1km 버퍼와 시군구 경계 면적비례 배분 (SGIS 행정구역별 통계, 인구 2024/종사자 2023)",
+    "industry_method": "SGIS 집계구 단위 10차 산업분류 대분류 종사자수, 면적비례 배분 (2023년 기준)",
+    "road_source": "OpenStreetMap (Overpass API), 차도 분류(motorway~unclassified) 기준, 경계 내 클립 후 길이 합산",
+    "household_source": "SGIS 통계지리정보서비스 집계구 단위 가구총괄(2024), 면적비례 배분",
+    "catchment_method": "핵심역 1km 버퍼와 분석경계의 면적 교차비율 (subway_network.zip 역좌표 기준)",
+    "bus_source": "국토교통부 전국 버스정류장 위치정보 (2025-10-31), 경계 내 정류장 수 / 면적(km²)"
+  },
+  "regions": {
+    "pangyo": {
+      "name": "판교테크노밸리",
+      "boundary_area_ha": 67.25,
+      "boundary_source": "판교 지구단위계획(성남시 고시) 특별계획구역 기반, 연속지적도(2026-06) + OSM 경계 조합. 구역 남측 인접 자족시설 필지(삼평동 668, 엔씨소프트 R&D센터 대지 11,531㎡) 포함, 제2판교 제외",
+      "core_station": "판교역 (신분당선·경강선)",
+      "landuse": {
+        "site_area_ha": 40.1,
+        "total_floor_area_m2": 2659845,
+        "far_percent": 663.3,
+        "vacant_lot_ratio_percent": 21.5,
+        "use_composition": {
+          "업무시설": 66.5,
+          "교육연구시설": 28.9,
+          "자동차관련시설": 3.9,
+          "공동주택": 0.8,
+          "기타": 0.0
+        },
+        "lum_entropy": 0.574,
+        "zoning_composition": {
+          "도시지원시설용지": 59.3,
+          "도로": 22.9,
+          "어린이공원": 4.0,
+          "주차장": 3.3,
+          "보행자전용도로": 3.2,
+          "기타(광장/공원/녹지 등)": 7.3
+        },
+        "zoning_source": "VWorld 계열 토지이용계획도(경기도), '성남판교지구 택지개발사업' 구역 기준"
+      },
+      "sociodemo": {
+        "population": 235,
+        "employment": 40953,
+        "job_housing_ratio": 174.2,
+        "industry_composition": {
+          "정보통신업": 44.9,
+          "전문·과학·기술서비스업": 19.2,
+          "사업지원서비스업": 13.8,
+          "도매및소매업": 8.0,
+          "제조업": 4.5,
+          "기타": 9.6
+        },
+        "households": 216,
+        "avg_household_size": 1.09,
+        "business_count": 1180,
+        "business_composition": {
+          "정보통신업": 26.7,
+          "숙박및음식점업": 21.3,
+          "도매및소매업": 15.0,
+          "전문,과학및기술서비스업": 11.8,
+          "부동산업": 5.8,
+          "기타": 19.4
+        }
+      },
+      "transport": {
+        "isochrone_30min_stations": 102,
+        "isochrone_60min_stations": 458,
+        "isochrone_30min_population": 1386315,
+        "isochrone_30min_employment": 1258482,
+        "isochrone_60min_population": 7405712,
+        "isochrone_60min_employment": 4655454,
+        "road_density_km_per_km2": 12.64,
+        "station_catchment_ratio": 38.4,
+        "bus_stop_density": 34.2
+      }
+    },
+    "gimpo": {
+      "name": "김포한강신도시 자족시설용지",
+      "boundary_area_ha": 17.35,
+      "boundary_source": "구래동 6871번지 일대, 건축HUB 건축물대장 검증 (업무시설/지식산업센터 단일 용도 확인)",
+      "core_station": "구래역 (김포골드라인)",
+      "landuse": {
+        "site_area_ha": 12.26,
+        "total_floor_area_m2": 806964,
+        "far_percent": 658.2,
+        "vacant_lot_ratio_percent": 34.2,
+        "use_composition": {
+          "업무시설": 48.2,
+          "공장(지식산업센터)": 30.8,
+          "창고시설": 20.5,
+          "의료시설": 0.5,
+          "기타": 0.0
+        },
+        "lum_entropy": 0.769,
+        "zoning_composition": {
+          "자족기능확보시설": 71.0,
+          "공공공지": 9.8,
+          "주차장": 7.3,
+          "완충녹지": 6.4,
+          "도로": 3.8,
+          "기타": 1.7
+        },
+        "zoning_source": "VWorld 계열 토지이용계획도(경기도), '김포한강신도시' 구역 기준"
+      },
+      "sociodemo": {
+        "population": 2283,
+        "employment": 1676,
+        "job_housing_ratio": 0.7,
+        "industry_composition": {
+          "도매및소매업": 28.0,
+          "제조업": 15.8,
+          "전문·과학·기술서비스업": 13.3,
+          "부동산업": 9.8,
+          "숙박및음식점업": 6.7,
+          "기타": 26.4
+        },
+        "households": 1704,
+        "avg_household_size": 1.34,
+        "business_count": 680,
+        "business_composition": {
+          "도매및소매업": 37.5,
+          "제조업": 12.2,
+          "부동산업": 11.0,
+          "전문,과학및기술서비스업": 10.7,
+          "정보통신업": 7.8,
+          "기타": 20.8
+        }
+      },
+      "transport": {
+        "isochrone_30min_stations": 10,
+        "isochrone_60min_stations": 108,
+        "isochrone_30min_population": 87924,
+        "isochrone_30min_employment": 43038,
+        "isochrone_60min_population": 2050245,
+        "isochrone_60min_employment": 1082264,
+        "road_density_km_per_km2": 3.44,
+        "station_catchment_ratio": 78.5,
+        "bus_stop_density": 23.1
+      }
+    }
+  },
+  "vacancy_evidence": [
+    {
+      "source": "파이낸셜뉴스 (2025-04-09)",
+      "text": "2022년 이후 공급된 지식산업센터 중 경기도 미분양률 43%, 인천 63%, 수도권 전체 44% (분양대행사 '세이노' 집계)",
+      "url": "https://v.daum.net/v/20250409134415119"
+    },
+    {
+      "source": "시사저널 (2022-07-18)",
+      "text": "김포시 S지식산업센터에서 분양가보다 2,000만원 낮은 급매물 등장",
+      "url": "https://www.sisajournal.com/news/articleView.html?idxno=242169"
+    }
+  ]
+}

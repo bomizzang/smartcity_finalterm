@@ -1,0 +1,78 @@
+{
+  "pangyo": [
+    {
+      "minutes": 10,
+      "stations": 13,
+      "population": 156617,
+      "employment": 139330
+    },
+    {
+      "minutes": 20,
+      "stations": 35,
+      "population": 511612,
+      "employment": 432486
+    },
+    {
+      "minutes": 30,
+      "stations": 102,
+      "population": 1386315,
+      "employment": 1258482
+    },
+    {
+      "minutes": 40,
+      "stations": 179,
+      "population": 2864601,
+      "employment": 2222928
+    },
+    {
+      "minutes": 50,
+      "stations": 342,
+      "population": 5190389,
+      "employment": 3705294
+    },
+    {
+      "minutes": 60,
+      "stations": 458,
+      "population": 7405712,
+      "employment": 4655454
+    }
+  ],
+  "gurae": [
+    {
+      "minutes": 10,
+      "stations": 5,
+      "population": 25682,
+      "employment": 11162
+    },
+    {
+      "minutes": 20,
+      "stations": 8,
+      "population": 41160,
+      "employment": 17913
+    },
+    {
+      "minutes": 30,
+      "stations": 10,
+      "population": 87924,
+      "employment": 43038
+    },
+    {
+      "minutes": 40,
+      "stations": 23,
+      "population": 229999,
+      "employment": 121315
+    },
+    {
+      "minutes": 50,
+      "stations": 46,
+      "population": 736858,
+      "employment": 349118
+    },
+    {
+      "minutes": 60,
+      "stations": 108,
+      "population": 2050245,
+      "employment": 1082264
+    }
+  ]
+}
