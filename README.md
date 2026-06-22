@@ -11,16 +11,6 @@ site/
 └── data/              ← 모든 통계·지도 데이터 (json, geojson)
 ```
 
-## 사용법 (npm, 빌드 불필요)
-
-1. GitHub에 새 저장소(Public) 만들기
-2. 이 폴더(`index.html`, `js/`, `data/`) 안의 내용 전체를 저장소 루트에 업로드
-3. 저장소 **Settings → Pages** → Source를 "Deploy from a branch" → `main` 브랜치, `/ (root)` 폴더로 설정
-4. 몇 분 후 `https://본인계정.github.io/저장소이름/` 에서 확인
-
-로컬 컴퓨터에서 미리 보고 싶다면, `index.html`을 그냥 더블클릭해서 열어도 대부분 동작하지만,
-일부 브라우저는 로컬 파일에서 `fetch()`로 `data/` 폴더를 읽는 것을 막을 수 있다(보안 정책).
-이 경우 VS Code의 "Live Server" 확장 또는 `python3 -m http.server` 명령으로 로컬 서버를 띄워서 확인하면 된다.
 
 ## 지도 타일(VWorld) 안내
 
